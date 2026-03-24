@@ -94,15 +94,15 @@ const BRAUHAUS_SEED = [
   { veedelName: "Braunsfeld", name: "Bei d'r Tant", address: "Aachener Str. 517", description: "Kölsche Kneipe mit hausgemachten Spezialitäten." },
 ];
 
-// Compute gamification scores for all users
-function computeScores(): UserScore[] {
-  const allUsers = storage.getAllUsers();
-  const teamVisitsList = storage.getTeamVisits();
+// Compute gamification scores for all users (now async)
+async function computeScores(): Promise<UserScore[]> {
+  const allUsers = await storage.getAllUsers();
+  const teamVisitsList = await storage.getTeamVisits();
   const teamVeedel = new Set(teamVisitsList.map((v) => v.veedelName));
   const teamCount = teamVeedel.size;
 
-  return allUsers.map((user) => {
-    const soloVisitsList = storage.getSoloVisits(user.id);
+  return Promise.all(allUsers.map(async (user) => {
+    const soloVisitsList = await storage.getSoloVisits(user.id);
     const soloVeedel = new Set(soloVisitsList.map((v) => v.veedelName));
     const soloCount = soloVeedel.size;
 
@@ -118,7 +118,6 @@ function computeScores(): UserScore[] {
         earned.push(ach);
       } else if (ach.type === "bezirk") {
         const bezirkVeedel = BEZIRKE[ach.id] || [];
-        // Check if ALL veedel in this bezirk are visited (solo or team)
         const allVisited = bezirkVeedel.every(
           (v) => soloVeedel.has(v) || teamVeedel.has(v)
         );
@@ -152,31 +151,31 @@ function computeScores(): UserScore[] {
       level,
       levelTitle,
     };
-  });
+  }));
 }
 
 export async function registerRoutes(server: Server, app: Express) {
   // === AUTH ===
 
   // Seed users on first run
-  const existingUsers = storage.getAllUsers();
+  const existingUsers = await storage.getAllUsers();
   if (existingUsers.length === 0) {
-    storage.createUser({ username: "andreas", password: hashPassword("koeln2026"), displayName: "Andreas" });
-    storage.createUser({ username: "christian", password: hashPassword("koeln2026"), displayName: "Christian" });
-    storage.createUser({ username: "sharjeel", password: hashPassword("koeln2026"), displayName: "Sharjeel" });
+    await storage.createUser({ username: "andreas", password: hashPassword("koeln2026"), displayName: "Andreas" });
+    await storage.createUser({ username: "christian", password: hashPassword("koeln2026"), displayName: "Christian" });
+    await storage.createUser({ username: "sharjeel", password: hashPassword("koeln2026"), displayName: "Sharjeel" });
   }
 
   // Seed brauhaus spots on first run
-  const existingBrauhaus = storage.getAllBrauhaus();
+  const existingBrauhaus = await storage.getAllBrauhaus();
   if (existingBrauhaus.length === 0) {
     for (const spot of BRAUHAUS_SEED) {
-      storage.createBrauhaus({ ...spot, rating: null, ratedBy: null, addedBy: null });
+      await storage.createBrauhaus({ ...spot, rating: null, ratedBy: null, addedBy: null });
     }
   }
 
-  app.post("/api/auth/login", (req: Request, res: Response) => {
+  app.post("/api/auth/login", async (req: Request, res: Response) => {
     const { username, password } = req.body;
-    const user = storage.getUserByUsername(username?.toLowerCase());
+    const user = await storage.getUserByUsername(username?.toLowerCase());
     if (!user || user.password !== hashPassword(password)) {
       return res.status(401).json({ message: "Falscher Benutzername oder Passwort" });
     }
@@ -189,73 +188,73 @@ export async function registerRoutes(server: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  app.get("/api/auth/me", (req: Request, res: Response) => {
+  app.get("/api/auth/me", async (req: Request, res: Response) => {
     const userId = (req.session as any)?.userId;
     if (!userId) return res.status(401).json({ message: "Nicht eingeloggt" });
-    const user = storage.getUser(userId);
+    const user = await storage.getUser(userId);
     if (!user) return res.status(401).json({ message: "Benutzer nicht gefunden" });
     res.json({ id: user.id, username: user.username, displayName: user.displayName });
   });
 
-  app.get("/api/users", requireAuth, (_req: Request, res: Response) => {
-    const allUsers = storage.getAllUsers();
+  app.get("/api/users", requireAuth, async (_req: Request, res: Response) => {
+    const allUsers = await storage.getAllUsers();
     res.json(allUsers.map(u => ({ id: u.id, username: u.username, displayName: u.displayName })));
   });
 
   // === SOLO VISITS ===
 
-  app.get("/api/solo-visits", requireAuth, (req: Request, res: Response) => {
+  app.get("/api/solo-visits", requireAuth, async (req: Request, res: Response) => {
     const userId = (req.session as any).userId;
-    res.json(storage.getSoloVisits(userId));
+    res.json(await storage.getSoloVisits(userId));
   });
 
-  app.get("/api/solo-visits/:veedel", requireAuth, (req: Request, res: Response) => {
-    const visits = storage.getSoloVisitsByVeedel(req.params.veedel);
+  app.get("/api/solo-visits/:veedel", requireAuth, async (req: Request, res: Response) => {
+    const visits = await storage.getSoloVisitsByVeedel(req.params.veedel);
     res.json(visits);
   });
 
-  app.post("/api/solo-visits", requireAuth, (req: Request, res: Response) => {
+  app.post("/api/solo-visits", requireAuth, async (req: Request, res: Response) => {
     const userId = (req.session as any).userId;
     const { veedelName, visitDate, notes } = req.body;
-    const visit = storage.createSoloVisit({ userId, veedelName, visitDate, notes });
+    const visit = await storage.createSoloVisit({ userId, veedelName, visitDate, notes });
     res.json(visit);
   });
 
-  app.delete("/api/solo-visits/:id", requireAuth, (req: Request, res: Response) => {
+  app.delete("/api/solo-visits/:id", requireAuth, async (req: Request, res: Response) => {
     const userId = (req.session as any).userId;
-    storage.deleteSoloVisit(parseInt(req.params.id), userId);
+    await storage.deleteSoloVisit(parseInt(req.params.id), userId);
     res.json({ ok: true });
   });
 
   // === TEAM VISITS ===
 
-  app.get("/api/team-visits", requireAuth, (_req: Request, res: Response) => {
-    res.json(storage.getTeamVisits());
+  app.get("/api/team-visits", requireAuth, async (_req: Request, res: Response) => {
+    res.json(await storage.getTeamVisits());
   });
 
-  app.post("/api/team-visits", requireAuth, (req: Request, res: Response) => {
+  app.post("/api/team-visits", requireAuth, async (req: Request, res: Response) => {
     const createdBy = (req.session as any).userId;
     const { veedelName, visitDate, notes } = req.body;
-    const visit = storage.createTeamVisit({ veedelName, visitDate, notes, createdBy });
+    const visit = await storage.createTeamVisit({ veedelName, visitDate, notes, createdBy });
     res.json(visit);
   });
 
-  app.delete("/api/team-visits/:id", requireAuth, (req: Request, res: Response) => {
-    storage.deleteTeamVisit(parseInt(req.params.id));
+  app.delete("/api/team-visits/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteTeamVisit(parseInt(req.params.id));
     res.json({ ok: true });
   });
 
   // === PHOTOS ===
 
-  app.get("/api/photos/:veedel", requireAuth, (req: Request, res: Response) => {
-    res.json(storage.getPhotosByVeedel(req.params.veedel));
+  app.get("/api/photos/:veedel", requireAuth, async (req: Request, res: Response) => {
+    res.json(await storage.getPhotosByVeedel(req.params.veedel));
   });
 
-  app.post("/api/photos", requireAuth, upload.single("photo"), (req: Request, res: Response) => {
+  app.post("/api/photos", requireAuth, upload.single("photo"), async (req: Request, res: Response) => {
     if (!req.file) return res.status(400).json({ message: "Kein Foto hochgeladen" });
     const uploadedBy = (req.session as any).userId;
     const { veedelName, visitType, visitId } = req.body;
-    const photo = storage.createPhoto({
+    const photo = await storage.createPhoto({
       filename: req.file.filename,
       originalName: req.file.originalname,
       veedelName,
@@ -276,21 +275,21 @@ export async function registerRoutes(server: Server, app: Express) {
     }
   });
 
-  app.delete("/api/photos/:id", requireAuth, (req: Request, res: Response) => {
-    storage.deletePhoto(parseInt(req.params.id));
+  app.delete("/api/photos/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deletePhoto(parseInt(req.params.id));
     res.json({ ok: true });
   });
 
   // === SUGGESTIONS ===
 
-  app.get("/api/suggestions", requireAuth, (_req: Request, res: Response) => {
-    res.json(storage.getAllSuggestions());
+  app.get("/api/suggestions", requireAuth, async (_req: Request, res: Response) => {
+    res.json(await storage.getAllSuggestions());
   });
 
-  app.post("/api/suggestions", requireAuth, (req: Request, res: Response) => {
+  app.post("/api/suggestions", requireAuth, async (req: Request, res: Response) => {
     const suggestedBy = (req.session as any).userId;
     const { veedelName, reason, suggestedDate } = req.body;
-    const suggestion = storage.createSuggestion({
+    const suggestion = await storage.createSuggestion({
       veedelName,
       suggestedBy,
       reason,
@@ -300,61 +299,59 @@ export async function registerRoutes(server: Server, app: Express) {
     res.json(suggestion);
   });
 
-  app.patch("/api/suggestions/:id", requireAuth, (req: Request, res: Response) => {
+  app.patch("/api/suggestions/:id", requireAuth, async (req: Request, res: Response) => {
     const { status } = req.body;
-    const updated = storage.updateSuggestionStatus(parseInt(req.params.id), status);
+    const updated = await storage.updateSuggestionStatus(parseInt(req.params.id), status);
     res.json(updated);
   });
 
-  app.delete("/api/suggestions/:id", requireAuth, (req: Request, res: Response) => {
-    storage.deleteSuggestion(parseInt(req.params.id));
+  app.delete("/api/suggestions/:id", requireAuth, async (req: Request, res: Response) => {
+    await storage.deleteSuggestion(parseInt(req.params.id));
     res.json({ ok: true });
   });
 
   // === BRAUHAUS ===
 
-  app.get("/api/brauhaus/:veedel", requireAuth, (req: Request, res: Response) => {
-    const spots = storage.getBrauhausByVeedel(decodeURIComponent(req.params.veedel));
+  app.get("/api/brauhaus/:veedel", requireAuth, async (req: Request, res: Response) => {
+    const spots = await storage.getBrauhausByVeedel(decodeURIComponent(req.params.veedel));
     res.json(spots);
   });
 
-  app.get("/api/brauhaus", requireAuth, (_req: Request, res: Response) => {
-    res.json(storage.getAllBrauhaus());
+  app.get("/api/brauhaus", requireAuth, async (_req: Request, res: Response) => {
+    res.json(await storage.getAllBrauhaus());
   });
 
-  app.post("/api/brauhaus", requireAuth, (req: Request, res: Response) => {
+  app.post("/api/brauhaus", requireAuth, async (req: Request, res: Response) => {
     const addedBy = (req.session as any).userId;
     const { veedelName, name, address, description } = req.body;
-    const spot = storage.createBrauhaus({ veedelName, name, address, description, rating: null, ratedBy: null, addedBy });
+    const spot = await storage.createBrauhaus({ veedelName, name, address, description, rating: null, ratedBy: null, addedBy });
     res.json(spot);
   });
 
-  app.patch("/api/brauhaus/:id/rate", requireAuth, (req: Request, res: Response) => {
+  app.patch("/api/brauhaus/:id/rate", requireAuth, async (req: Request, res: Response) => {
     const userId = (req.session as any).userId;
     const { rating } = req.body;
     if (!rating || rating < 1 || rating > 5) {
       return res.status(400).json({ message: "Bewertung muss zwischen 1 und 5 sein" });
     }
-    const updated = storage.rateBrauhaus(parseInt(req.params.id), rating, userId);
+    const updated = await storage.rateBrauhaus(parseInt(req.params.id), rating, userId);
     res.json(updated);
   });
 
   // === STATS ===
 
-  app.get("/api/stats", requireAuth, (req: Request, res: Response) => {
+  app.get("/api/stats", requireAuth, async (req: Request, res: Response) => {
     const userId = (req.session as any).userId;
-    const allUsers = storage.getAllUsers();
-    const teamVisitsList = storage.getTeamVisits();
-    const mySoloVisits = storage.getSoloVisits(userId);
+    const allUsers = await storage.getAllUsers();
+    const teamVisitsList = await storage.getTeamVisits();
+    const mySoloVisits = await storage.getSoloVisits(userId);
 
-    // Get unique veedel names for team and solo
     const teamVeedel = new Set(teamVisitsList.map(v => v.veedelName));
     const soloVeedel = new Set(mySoloVisits.map(v => v.veedelName));
 
-    // Get all users' solo visits for the "who visited what" overview
     const allSoloVisits: Record<number, string[]> = {};
     for (const user of allUsers) {
-      const visits = storage.getSoloVisits(user.id);
+      const visits = await storage.getSoloVisits(user.id);
       allSoloVisits[user.id] = [...new Set(visits.map(v => v.veedelName))];
     }
 
@@ -384,9 +381,8 @@ export async function registerRoutes(server: Server, app: Express) {
 
   // === GAMIFICATION ===
 
-  app.get("/api/scores", requireAuth, (_req: Request, res: Response) => {
-    const scores = computeScores();
-    // Sort by points descending
+  app.get("/api/scores", requireAuth, async (_req: Request, res: Response) => {
+    const scores = await computeScores();
     scores.sort((a, b) => b.points - a.points);
     res.json(scores);
   });

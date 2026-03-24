@@ -1,5 +1,5 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { eq, and } from "drizzle-orm";
 import {
   users, soloVisits, teamVisits, photos, suggestions, brauhausSpots,
@@ -11,75 +11,78 @@ import {
   type BrauhausSpot, type InsertBrauhausSpot,
 } from "@shared/schema";
 
-const sqlite = new Database("veedel.db");
-sqlite.pragma("journal_mode = WAL");
-export const db = drizzle(sqlite);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+});
+
+export const db = drizzle(pool);
 
 export interface IStorage {
   // Users
-  getUser(id: number): User | undefined;
-  getUserByUsername(username: string): User | undefined;
-  createUser(user: InsertUser): User;
-  getAllUsers(): User[];
+  getUser(id: number): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  getAllUsers(): Promise<User[]>;
 
   // Solo visits
-  getSoloVisits(userId: number): SoloVisit[];
-  getSoloVisitsByVeedel(veedelName: string): SoloVisit[];
-  createSoloVisit(visit: InsertSoloVisit): SoloVisit;
-  deleteSoloVisit(id: number, userId: number): void;
+  getSoloVisits(userId: number): Promise<SoloVisit[]>;
+  getSoloVisitsByVeedel(veedelName: string): Promise<SoloVisit[]>;
+  createSoloVisit(visit: InsertSoloVisit): Promise<SoloVisit>;
+  deleteSoloVisit(id: number, userId: number): Promise<void>;
 
   // Team visits
-  getTeamVisits(): TeamVisit[];
-  getTeamVisitByVeedel(veedelName: string): TeamVisit | undefined;
-  createTeamVisit(visit: InsertTeamVisit): TeamVisit;
-  deleteTeamVisit(id: number): void;
+  getTeamVisits(): Promise<TeamVisit[]>;
+  getTeamVisitByVeedel(veedelName: string): Promise<TeamVisit | undefined>;
+  createTeamVisit(visit: InsertTeamVisit): Promise<TeamVisit>;
+  deleteTeamVisit(id: number): Promise<void>;
 
   // Photos
-  getPhotosByVisit(visitType: string, visitId: number): Photo[];
-  getPhotosByVeedel(veedelName: string): Photo[];
-  createPhoto(photo: InsertPhoto): Photo;
-  deletePhoto(id: number): void;
+  getPhotosByVisit(visitType: string, visitId: number): Promise<Photo[]>;
+  getPhotosByVeedel(veedelName: string): Promise<Photo[]>;
+  createPhoto(photo: InsertPhoto): Promise<Photo>;
+  deletePhoto(id: number): Promise<void>;
 
   // Suggestions
-  getAllSuggestions(): Suggestion[];
-  createSuggestion(suggestion: InsertSuggestion): Suggestion;
-  updateSuggestionStatus(id: number, status: string): Suggestion | undefined;
-  deleteSuggestion(id: number): void;
+  getAllSuggestions(): Promise<Suggestion[]>;
+  createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion>;
+  updateSuggestionStatus(id: number, status: string): Promise<Suggestion | undefined>;
+  deleteSuggestion(id: number): Promise<void>;
 
   // Brauhaus spots
-  getBrauhausByVeedel(veedelName: string): BrauhausSpot[];
-  getAllBrauhaus(): BrauhausSpot[];
-  createBrauhaus(spot: InsertBrauhausSpot): BrauhausSpot;
-  rateBrauhaus(id: number, rating: number, userId: number): BrauhausSpot | undefined;
-  deleteBrauhaus(id: number): void;
+  getBrauhausByVeedel(veedelName: string): Promise<BrauhausSpot[]>;
+  getAllBrauhaus(): Promise<BrauhausSpot[]>;
+  createBrauhaus(spot: InsertBrauhausSpot): Promise<BrauhausSpot>;
+  rateBrauhaus(id: number, rating: number, userId: number): Promise<BrauhausSpot | undefined>;
+  deleteBrauhaus(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
-  constructor() {
-    // Create tables
-    sqlite.exec(`
+  async initialize() {
+    // Create tables if they don't exist
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
         password TEXT NOT NULL,
         display_name TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS solo_visits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id),
         veedel_name TEXT NOT NULL,
         visit_date TEXT NOT NULL,
         notes TEXT
       );
       CREATE TABLE IF NOT EXISTS team_visits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         veedel_name TEXT NOT NULL,
         visit_date TEXT NOT NULL,
         notes TEXT,
         created_by INTEGER NOT NULL REFERENCES users(id)
       );
       CREATE TABLE IF NOT EXISTS photos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         filename TEXT NOT NULL,
         original_name TEXT NOT NULL,
         veedel_name TEXT NOT NULL,
@@ -88,7 +91,7 @@ export class DatabaseStorage implements IStorage {
         visit_id INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS suggestions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         veedel_name TEXT NOT NULL,
         suggested_by INTEGER NOT NULL REFERENCES users(id),
         reason TEXT,
@@ -96,7 +99,7 @@ export class DatabaseStorage implements IStorage {
         status TEXT NOT NULL DEFAULT 'open'
       );
       CREATE TABLE IF NOT EXISTS brauhaus_spots (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         veedel_name TEXT NOT NULL,
         name TEXT NOT NULL,
         address TEXT,
@@ -109,119 +112,127 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Users
-  getUser(id: number): User | undefined {
-    return db.select().from(users).where(eq(users.id, id)).get();
+  async getUser(id: number): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.id, id));
+    return result[0];
   }
 
-  getUserByUsername(username: string): User | undefined {
-    return db.select().from(users).where(eq(users.username, username)).get();
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.username, username));
+    return result[0];
   }
 
-  createUser(user: InsertUser): User {
-    return db.insert(users).values(user).returning().get();
+  async createUser(user: InsertUser): Promise<User> {
+    const result = await db.insert(users).values(user).returning();
+    return result[0];
   }
 
-  getAllUsers(): User[] {
-    return db.select().from(users).all();
+  async getAllUsers(): Promise<User[]> {
+    return db.select().from(users);
   }
 
   // Solo visits
-  getSoloVisits(userId: number): SoloVisit[] {
-    return db.select().from(soloVisits).where(eq(soloVisits.userId, userId)).all();
+  async getSoloVisits(userId: number): Promise<SoloVisit[]> {
+    return db.select().from(soloVisits).where(eq(soloVisits.userId, userId));
   }
 
-  getSoloVisitsByVeedel(veedelName: string): SoloVisit[] {
-    return db.select().from(soloVisits).where(eq(soloVisits.veedelName, veedelName)).all();
+  async getSoloVisitsByVeedel(veedelName: string): Promise<SoloVisit[]> {
+    return db.select().from(soloVisits).where(eq(soloVisits.veedelName, veedelName));
   }
 
-  createSoloVisit(visit: InsertSoloVisit): SoloVisit {
-    return db.insert(soloVisits).values(visit).returning().get();
+  async createSoloVisit(visit: InsertSoloVisit): Promise<SoloVisit> {
+    const result = await db.insert(soloVisits).values(visit).returning();
+    return result[0];
   }
 
-  deleteSoloVisit(id: number, userId: number): void {
-    db.delete(soloVisits).where(and(eq(soloVisits.id, id), eq(soloVisits.userId, userId))).run();
+  async deleteSoloVisit(id: number, userId: number): Promise<void> {
+    await db.delete(soloVisits).where(and(eq(soloVisits.id, id), eq(soloVisits.userId, userId)));
   }
 
   // Team visits
-  getTeamVisits(): TeamVisit[] {
-    return db.select().from(teamVisits).all();
+  async getTeamVisits(): Promise<TeamVisit[]> {
+    return db.select().from(teamVisits);
   }
 
-  getTeamVisitByVeedel(veedelName: string): TeamVisit | undefined {
-    return db.select().from(teamVisits).where(eq(teamVisits.veedelName, veedelName)).get();
+  async getTeamVisitByVeedel(veedelName: string): Promise<TeamVisit | undefined> {
+    const result = await db.select().from(teamVisits).where(eq(teamVisits.veedelName, veedelName));
+    return result[0];
   }
 
-  createTeamVisit(visit: InsertTeamVisit): TeamVisit {
-    return db.insert(teamVisits).values(visit).returning().get();
+  async createTeamVisit(visit: InsertTeamVisit): Promise<TeamVisit> {
+    const result = await db.insert(teamVisits).values(visit).returning();
+    return result[0];
   }
 
-  deleteTeamVisit(id: number): void {
-    db.delete(teamVisits).where(eq(teamVisits.id, id)).run();
+  async deleteTeamVisit(id: number): Promise<void> {
+    await db.delete(teamVisits).where(eq(teamVisits.id, id));
   }
 
   // Photos
-  getPhotosByVisit(visitType: string, visitId: number): Photo[] {
+  async getPhotosByVisit(visitType: string, visitId: number): Promise<Photo[]> {
     return db.select().from(photos)
-      .where(and(eq(photos.visitType, visitType), eq(photos.visitId, visitId)))
-      .all();
+      .where(and(eq(photos.visitType, visitType), eq(photos.visitId, visitId)));
   }
 
-  getPhotosByVeedel(veedelName: string): Photo[] {
-    return db.select().from(photos).where(eq(photos.veedelName, veedelName)).all();
+  async getPhotosByVeedel(veedelName: string): Promise<Photo[]> {
+    return db.select().from(photos).where(eq(photos.veedelName, veedelName));
   }
 
-  createPhoto(photo: InsertPhoto): Photo {
-    return db.insert(photos).values(photo).returning().get();
+  async createPhoto(photo: InsertPhoto): Promise<Photo> {
+    const result = await db.insert(photos).values(photo).returning();
+    return result[0];
   }
 
-  deletePhoto(id: number): void {
-    db.delete(photos).where(eq(photos.id, id)).run();
+  async deletePhoto(id: number): Promise<void> {
+    await db.delete(photos).where(eq(photos.id, id));
   }
 
   // Suggestions
-  getAllSuggestions(): Suggestion[] {
-    return db.select().from(suggestions).all();
+  async getAllSuggestions(): Promise<Suggestion[]> {
+    return db.select().from(suggestions);
   }
 
-  createSuggestion(suggestion: InsertSuggestion): Suggestion {
-    return db.insert(suggestions).values(suggestion).returning().get();
+  async createSuggestion(suggestion: InsertSuggestion): Promise<Suggestion> {
+    const result = await db.insert(suggestions).values(suggestion).returning();
+    return result[0];
   }
 
-  updateSuggestionStatus(id: number, status: string): Suggestion | undefined {
-    return db.update(suggestions)
+  async updateSuggestionStatus(id: number, status: string): Promise<Suggestion | undefined> {
+    const result = await db.update(suggestions)
       .set({ status })
       .where(eq(suggestions.id, id))
-      .returning()
-      .get();
+      .returning();
+    return result[0];
   }
 
-  deleteSuggestion(id: number): void {
-    db.delete(suggestions).where(eq(suggestions.id, id)).run();
+  async deleteSuggestion(id: number): Promise<void> {
+    await db.delete(suggestions).where(eq(suggestions.id, id));
   }
 
   // Brauhaus spots
-  getBrauhausByVeedel(veedelName: string): BrauhausSpot[] {
-    return db.select().from(brauhausSpots).where(eq(brauhausSpots.veedelName, veedelName)).all();
+  async getBrauhausByVeedel(veedelName: string): Promise<BrauhausSpot[]> {
+    return db.select().from(brauhausSpots).where(eq(brauhausSpots.veedelName, veedelName));
   }
 
-  getAllBrauhaus(): BrauhausSpot[] {
-    return db.select().from(brauhausSpots).all();
+  async getAllBrauhaus(): Promise<BrauhausSpot[]> {
+    return db.select().from(brauhausSpots);
   }
 
-  createBrauhaus(spot: InsertBrauhausSpot): BrauhausSpot {
-    return db.insert(brauhausSpots).values(spot).returning().get();
+  async createBrauhaus(spot: InsertBrauhausSpot): Promise<BrauhausSpot> {
+    const result = await db.insert(brauhausSpots).values(spot).returning();
+    return result[0];
   }
 
-  rateBrauhaus(id: number, rating: number, userId: number): BrauhausSpot | undefined {
-    return db.update(brauhausSpots)
+  async rateBrauhaus(id: number, rating: number, userId: number): Promise<BrauhausSpot | undefined> {
+    const result = await db.update(brauhausSpots)
       .set({ rating, ratedBy: userId })
       .where(eq(brauhausSpots.id, id))
-      .returning()
-      .get();
+      .returning();
+    return result[0];
   }
 
-  deleteBrauhaus(id: number): void {
-    db.delete(brauhausSpots).where(eq(brauhausSpots.id, id)).run();
+  async deleteBrauhaus(id: number): Promise<void> {
+    await db.delete(brauhausSpots).where(eq(brauhausSpots.id, id));
   }
 }
 

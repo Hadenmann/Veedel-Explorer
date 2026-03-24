@@ -1,18 +1,18 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Users table
-export const users = sqliteTable("users", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   displayName: text("display_name").notNull(),
 });
 
 // Solo visits - individual visits to a Veedel
-export const soloVisits = sqliteTable("solo_visits", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const soloVisits = pgTable("solo_visits", {
+  id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id),
   veedelName: text("veedel_name").notNull(),
   visitDate: text("visit_date").notNull(),
@@ -20,8 +20,8 @@ export const soloVisits = sqliteTable("solo_visits", {
 });
 
 // Team visits - visits made together by the group
-export const teamVisits = sqliteTable("team_visits", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const teamVisits = pgTable("team_visits", {
+  id: serial("id").primaryKey(),
   veedelName: text("veedel_name").notNull(),
   visitDate: text("visit_date").notNull(),
   notes: text("notes"),
@@ -29,8 +29,8 @@ export const teamVisits = sqliteTable("team_visits", {
 });
 
 // Photos for visits
-export const photos = sqliteTable("photos", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const photos = pgTable("photos", {
+  id: serial("id").primaryKey(),
   filename: text("filename").notNull(),
   originalName: text("original_name").notNull(),
   veedelName: text("veedel_name").notNull(),
@@ -40,8 +40,8 @@ export const photos = sqliteTable("photos", {
 });
 
 // Suggestions for next visits
-export const suggestions = sqliteTable("suggestions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const suggestions = pgTable("suggestions", {
+  id: serial("id").primaryKey(),
   veedelName: text("veedel_name").notNull(),
   suggestedBy: integer("suggested_by").notNull().references(() => users.id),
   reason: text("reason"),
@@ -50,8 +50,8 @@ export const suggestions = sqliteTable("suggestions", {
 });
 
 // Brauhaus recommendations per Veedel
-export const brauhausSpots = sqliteTable("brauhaus_spots", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const brauhausSpots = pgTable("brauhaus_spots", {
+  id: serial("id").primaryKey(),
   veedelName: text("veedel_name").notNull(),
   name: text("name").notNull(),
   address: text("address"),
