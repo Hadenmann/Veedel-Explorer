@@ -76,11 +76,9 @@ function VeedelLabels({ geojson, teamSet, soloSet }: { geojson: any; teamSet: Se
     return () => { map.off("zoomend", handler); };
   }, [map]);
 
-  // Only show labels when zoomed in enough
-  if (zoom < 12 || !geojson) return null;
-
-  // Calculate centroids
+  // Calculate centroids (always call useMemo — never skip hooks conditionally)
   const labels = useMemo(() => {
+    if (!geojson) return [];
     return geojson.features.map((feature: any) => {
       const name = feature.properties?.name;
       if (!name) return null;
@@ -111,6 +109,9 @@ function VeedelLabels({ geojson, teamSet, soloSet }: { geojson: any; teamSet: Se
       };
     }).filter(Boolean);
   }, [geojson, teamSet, soloSet]);
+
+  // Don't render labels when zoomed out too far
+  if (zoom < 12 || !geojson) return null;
 
   // Adjust font size based on zoom
   const fontSize = zoom >= 15 ? 12 : zoom >= 14 ? 11 : zoom >= 13 ? 10 : 9;
@@ -351,6 +352,8 @@ export default function MapPage() {
         <MapContainer
           center={[50.9375, 6.9603]}
           zoom={12}
+          minZoom={10}
+          maxZoom={18}
           className="h-full w-full"
           zoomControl={false}
         >
