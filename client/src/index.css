@@ -165,6 +165,19 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+/* iOS Safe-Area + dynamic viewport height */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+/* Full-height container that works correctly in iOS Safari */
+.h-dvh {
+  height: 100dvh;
+}
+
 /* Veedel label markers - no background, no shadow, no pointer events */
 .veedel-label {
   background: transparent !important;

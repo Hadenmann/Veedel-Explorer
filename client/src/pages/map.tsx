@@ -44,7 +44,7 @@ function TileLayerSwitcher({ layer }: { layer: TileLayerKey }) {
 function ZoomControls() {
   const map = useMap();
   return (
-    <div className="absolute bottom-28 right-4 z-[1000] flex flex-col gap-1.5">
+    <div className="absolute z-[1000] flex flex-col gap-1.5" style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 7rem)', right: 'calc(env(safe-area-inset-right, 0px) + 1rem)' }}>
       <button
         className="w-10 h-10 bg-card border border-border rounded-lg shadow-md flex items-center justify-center hover:bg-accent active:scale-95 transition-all"
         onClick={() => map.zoomIn()}
@@ -266,9 +266,19 @@ export default function MapPage() {
   );
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-dvh flex flex-col" style={{ height: '100dvh' }}>
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 bg-card border-b border-border shrink-0 z-50">
+      <header
+        className="flex items-center justify-between bg-card border-b border-border shrink-0"
+        style={{
+          position: 'relative',
+          zIndex: 1001,
+          paddingTop: `calc(0.75rem + env(safe-area-inset-top, 0px))`,
+          paddingBottom: '0.75rem',
+          paddingLeft: `calc(1rem + env(safe-area-inset-left, 0px))`,
+          paddingRight: `calc(1rem + env(safe-area-inset-right, 0px))`,
+        }}
+      >
         <div className="flex items-center gap-2">
           <MapPin className="w-5 h-5 text-primary" />
           <span className="font-semibold text-base" data-testid="text-app-title">Veedel Explorer</span>
@@ -300,7 +310,10 @@ export default function MapPage() {
       </header>
 
       {/* Legend */}
-      <div className="absolute bottom-6 left-4 z-[1000] bg-card/95 backdrop-blur border border-border rounded-lg p-3 text-xs space-y-1.5">
+      <div
+        className="absolute z-[1000] bg-card/95 backdrop-blur border border-border rounded-lg p-3 text-xs space-y-1.5"
+        style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.5rem)', left: 'calc(env(safe-area-inset-left, 0px) + 1rem)' }}
+      >
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-sm bg-green-600 inline-block" />
           <span>Team besucht</span>
@@ -316,7 +329,7 @@ export default function MapPage() {
       </div>
 
       {/* Layer switcher */}
-      <div className="absolute top-16 right-4 z-[1000]">
+      <div className="absolute z-[1001]" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 4rem)', right: 'calc(env(safe-area-inset-right, 0px) + 1rem)' }}>
         <Button
           variant="secondary"
           size="sm"
