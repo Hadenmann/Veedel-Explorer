@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
 import { useAuth } from "@/lib/auth";
@@ -11,8 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   ArrowLeft, Camera, Check, Users, User as UserIcon, Plus, Trash2, Calendar,
-  Beer, Star, MapPin,
+  Beer, Star, MapPin, X, ChevronLeft, ChevronRight,
 } from "lucide-react";
+
 
 interface Visit {
   id: number;
@@ -100,6 +101,7 @@ export default function VeedelDetail() {
   const [newBrauhausName, setNewBrauhausName] = useState("");
   const [newBrauhausAddress, setNewBrauhausAddress] = useState("");
   const [newBrauhausDesc, setNewBrauhausDesc] = useState("");
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   const { data: soloVisits = [] } = useQuery<Visit[]>({
     queryKey: ["/api/solo-visits", veedelName],
@@ -557,8 +559,15 @@ export default function VeedelDetail() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2">
-                {photos.map((p) => (
-                  <div key={p.id} className="relative group">
+                {photos.map((p, idx) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setLightboxIndex(idx)}
+                    className="relative group block w-full p-0 border-0 bg-transparent cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-primary rounded-md"
+                    aria-label={`Foto ${p.originalName} öffnen`}
+                    data-testid={`button-open-photo-${p.id}`}
+                  >
                     <img
                       src={`/api/uploads/${p.filename}`}
                       alt={p.originalName}
@@ -567,18 +576,153 @@ export default function VeedelDetail() {
                       onError={(e) => {
                         // Hide broken thumbnails (e.g. legacy uploads lost on redeploy)
                         const el = e.currentTarget;
-                        el.parentElement?.classList.add("hidden");
+                        el.closest("button")?.classList.add("hidden");
                       }}
                     />
                     <div className="absolute bottom-1 left-1 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">
                       {userMap[p.uploadedBy] || "?"}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </CardContent>
           </Card>
         )}
+      </div>
+
+      <PhotoLightbox
+        photos={photos}
+        index={lightboxIndex}
+        userMap={userMap}
+        onClose={() => setLightboxIndex(null)}
+        onPrev={() =>
+          setLightboxIndex((i) =>
+            i === null ? null : (i - 1 + photos.length) % photos.length
+          )
+        }
+        onNext={() =>
+          setLightboxIndex((i) =>
+            i === null ? null : (i + 1) % photos.length
+          )
+        }
+      />
+    </div>
+  );
+}
+
+function PhotoLightbox({
+  photos,
+  index,
+  userMap,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  photos: Photo[];
+  index: number | null;
+  userMap: Record<number, string>;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  // Keyboard nav: ESC to close, arrows to navigate
+  useEffect(() => {
+    if (index === null) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") onPrev();
+      else if (e.key === "ArrowRight") onNext();
+    };
+    window.addEventListener("keydown", handler);
+    // Lock body scroll while lightbox open
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handler);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [index, onClose, onPrev, onNext]);
+
+  // Touch swipe
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => setTouchStartX(e.touches[0].clientX);
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) {
+      if (dx > 0) onPrev();
+      else onNext();
+    }
+    setTouchStartX(null);
+  };
+
+  if (index === null || !photos[index]) return null;
+  const p = photos[index];
+  const hasMultiple = photos.length > 1;
+
+  return (
+    <div
+      className="fixed inset-0 z-[1000] bg-black/90 flex items-center justify-center"
+      onClick={onClose}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      role="dialog"
+      aria-modal="true"
+      data-testid="photo-lightbox"
+    >
+      {/* Close button */}
+      <button
+        type="button"
+        className="absolute top-3 right-3 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
+        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        aria-label="Schließen"
+        data-testid="button-lightbox-close"
+      >
+        <X className="w-6 h-6" />
+      </button>
+
+      {/* Prev */}
+      {hasMultiple && (
+        <button
+          type="button"
+          className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
+          onClick={(e) => { e.stopPropagation(); onPrev(); }}
+          aria-label="Vorheriges Foto"
+          data-testid="button-lightbox-prev"
+        >
+          <ChevronLeft className="w-7 h-7" />
+        </button>
+      )}
+
+      {/* Image */}
+      <img
+        src={`/api/uploads/${p.filename}`}
+        alt={p.originalName}
+        className="max-h-[90vh] max-w-[92vw] object-contain rounded shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        data-testid={`img-lightbox-${p.id}`}
+      />
+
+      {/* Next */}
+      {hasMultiple && (
+        <button
+          type="button"
+          className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
+          onClick={(e) => { e.stopPropagation(); onNext(); }}
+          aria-label="Nächstes Foto"
+          data-testid="button-lightbox-next"
+        >
+          <ChevronRight className="w-7 h-7" />
+        </button>
+      )}
+
+      {/* Caption */}
+      <div
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 text-white text-xs bg-black/60 px-3 py-1.5 rounded-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {userMap[p.uploadedBy] || "?"}
+        {hasMultiple && <span className="opacity-70"> · {index + 1}/{photos.length}</span>}
       </div>
     </div>
   );
