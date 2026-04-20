@@ -1,4 +1,11 @@
-import { pgTable, text, integer, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, serial, customType } from "drizzle-orm/pg-core";
+
+// bytea helper for drizzle
+const bytea = customType<{ data: Buffer; default: false }>({
+  dataType() {
+    return "bytea";
+  },
+});
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -37,6 +44,8 @@ export const photos = pgTable("photos", {
   uploadedBy: integer("uploaded_by").notNull().references(() => users.id),
   visitType: text("visit_type").notNull(), // 'solo' or 'team'
   visitId: integer("visit_id").notNull(),
+  mimeType: text("mime_type"),
+  data: bytea("data"),
 });
 
 // Suggestions for next visits
@@ -65,7 +74,7 @@ export const brauhausSpots = pgTable("brauhaus_spots", {
 export const insertUserSchema = createInsertSchema(users).omit({ id: true });
 export const insertSoloVisitSchema = createInsertSchema(soloVisits).omit({ id: true });
 export const insertTeamVisitSchema = createInsertSchema(teamVisits).omit({ id: true });
-export const insertPhotoSchema = createInsertSchema(photos).omit({ id: true });
+export const insertPhotoSchema = createInsertSchema(photos).omit({ id: true, data: true });
 export const insertSuggestionSchema = createInsertSchema(suggestions).omit({ id: true });
 export const insertBrauhausSpotSchema = createInsertSchema(brauhausSpots).omit({ id: true });
 

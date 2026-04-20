@@ -23,23 +23,10 @@ function requireAuth(req: Request, res: Response, next: Function) {
   next();
 }
 
-// Setup multer for photo uploads
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const multerStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const name = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}${ext}`;
-    cb(null, name);
-  },
-});
-
+// Photos are stored directly in Postgres as bytea to survive redeploys on
+// ephemeral filesystems (e.g. Render's default disks).
 const upload = multer({
-  storage: multerStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
     const allowed = /jpeg|jpg|png|gif|webp|heic/;
@@ -254,25 +241,32 @@ export async function registerRoutes(server: Server, app: Express) {
     if (!req.file) return res.status(400).json({ message: "Kein Foto hochgeladen" });
     const uploadedBy = (req.session as any).userId;
     const { veedelName, visitType, visitId } = req.body;
+    const ext = path.extname(req.file.originalname);
+    const filename = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}${ext}`;
     const photo = await storage.createPhoto({
-      filename: req.file.filename,
+      filename,
       originalName: req.file.originalname,
       veedelName,
       uploadedBy,
       visitType,
       visitId: parseInt(visitId),
+      data: req.file.buffer,
+      mimeType: req.file.mimetype,
     });
-    res.json(photo);
+    // Don't echo the binary blob back to the client
+    const { data: _omit, ...photoMeta } = photo as any;
+    res.json(photoMeta);
   });
 
-  // Serve uploaded photos
-  app.get("/api/uploads/:filename", (req: Request, res: Response) => {
-    const filePath = path.join(uploadDir, req.params.filename);
-    if (fs.existsSync(filePath)) {
-      res.sendFile(filePath);
-    } else {
-      res.status(404).json({ message: "Datei nicht gefunden" });
+  // Serve uploaded photos from the database
+  app.get("/api/uploads/:filename", async (req: Request, res: Response) => {
+    const result = await storage.getPhotoData(req.params.filename);
+    if (!result) {
+      return res.status(404).json({ message: "Datei nicht gefunden" });
     }
+    res.setHeader("Content-Type", result.mimeType);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.send(result.data);
   });
 
   app.delete("/api/photos/:id", requireAuth, async (req: Request, res: Response) => {

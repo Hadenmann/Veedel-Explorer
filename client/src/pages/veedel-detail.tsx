@@ -564,6 +564,11 @@ export default function VeedelDetail() {
                       alt={p.originalName}
                       className="w-full h-32 object-cover rounded-md"
                       data-testid={`img-photo-${p.id}`}
+                      onError={(e) => {
+                        // Hide broken thumbnails (e.g. legacy uploads lost on redeploy)
+                        const el = e.currentTarget;
+                        el.parentElement?.classList.add("hidden");
+                      }}
                     />
                     <div className="absolute bottom-1 left-1 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded">
                       {userMap[p.uploadedBy] || "?"}

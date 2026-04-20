@@ -1,6 +1,8 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
+import path from "path";
+import fs from "fs";
 import {
   users, soloVisits, teamVisits, photos, suggestions, brauhausSpots,
   type User, type InsertUser,
@@ -40,7 +42,8 @@ export interface IStorage {
   // Photos
   getPhotosByVisit(visitType: string, visitId: number): Promise<Photo[]>;
   getPhotosByVeedel(veedelName: string): Promise<Photo[]>;
-  createPhoto(photo: InsertPhoto): Promise<Photo>;
+  createPhoto(photo: InsertPhoto & { data?: Buffer; mimeType?: string }): Promise<Photo>;
+  getPhotoData(filename: string): Promise<{ data: Buffer; mimeType: string } | undefined>;
   deletePhoto(id: number): Promise<void>;
 
   // Suggestions
@@ -88,8 +91,12 @@ export class DatabaseStorage implements IStorage {
         veedel_name TEXT NOT NULL,
         uploaded_by INTEGER NOT NULL REFERENCES users(id),
         visit_type TEXT NOT NULL,
-        visit_id INTEGER NOT NULL
+        visit_id INTEGER NOT NULL,
+        mime_type TEXT,
+        data BYTEA
       );
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS mime_type TEXT;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS data BYTEA;
       CREATE TABLE IF NOT EXISTS suggestions (
         id SERIAL PRIMARY KEY,
         veedel_name TEXT NOT NULL,
@@ -109,6 +116,45 @@ export class DatabaseStorage implements IStorage {
         added_by INTEGER REFERENCES users(id)
       );
     `);
+
+    // Migrate legacy file-based photos to database, delete orphans
+    await this.migrateLegacyPhotos();
+  }
+
+  // Migrate any photos that still reference files on disk into bytea.
+  // If the file is gone (ephemeral filesystem / redeploy), delete the DB row.
+  async migrateLegacyPhotos(): Promise<void> {
+    const uploadDir = path.join(process.cwd(), "uploads");
+    const legacy = await db.select().from(photos).where(isNull(photos.data));
+    if (legacy.length === 0) return;
+
+    let migrated = 0;
+    let deleted = 0;
+    for (const p of legacy) {
+      const filePath = path.join(uploadDir, p.filename);
+      if (fs.existsSync(filePath)) {
+        try {
+          const buf = fs.readFileSync(filePath);
+          const ext = path.extname(p.filename).toLowerCase().replace(".", "");
+          const mimeMap: Record<string, string> = {
+            jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+            gif: "image/gif", webp: "image/webp", heic: "image/heic",
+          };
+          const mimeType = mimeMap[ext] || "application/octet-stream";
+          await db.update(photos).set({ data: buf, mimeType }).where(eq(photos.id, p.id));
+          migrated++;
+        } catch (err) {
+          console.error(`[photos] failed to migrate ${p.filename}:`, err);
+          await db.delete(photos).where(eq(photos.id, p.id));
+          deleted++;
+        }
+      } else {
+        // Orphan: file gone, delete stale row so UI stops showing ghost thumbnails
+        await db.delete(photos).where(eq(photos.id, p.id));
+        deleted++;
+      }
+    }
+    console.log(`[photos] legacy migration: migrated=${migrated}, deleted_orphans=${deleted}`);
   }
 
   // Users
@@ -169,18 +215,48 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Photos
+  // NOTE: exclude the `data` bytea column from list queries to avoid
+  // shipping megabytes of binary per request. Bytes are only read via
+  // getPhotoData(filename) when serving /api/uploads/:filename.
   async getPhotosByVisit(visitType: string, visitId: number): Promise<Photo[]> {
-    return db.select().from(photos)
+    const rows = await db.select({
+      id: photos.id,
+      filename: photos.filename,
+      originalName: photos.originalName,
+      veedelName: photos.veedelName,
+      uploadedBy: photos.uploadedBy,
+      visitType: photos.visitType,
+      visitId: photos.visitId,
+      mimeType: photos.mimeType,
+    }).from(photos)
       .where(and(eq(photos.visitType, visitType), eq(photos.visitId, visitId)));
+    return rows as unknown as Photo[];
   }
 
   async getPhotosByVeedel(veedelName: string): Promise<Photo[]> {
-    return db.select().from(photos).where(eq(photos.veedelName, veedelName));
+    const rows = await db.select({
+      id: photos.id,
+      filename: photos.filename,
+      originalName: photos.originalName,
+      veedelName: photos.veedelName,
+      uploadedBy: photos.uploadedBy,
+      visitType: photos.visitType,
+      visitId: photos.visitId,
+      mimeType: photos.mimeType,
+    }).from(photos).where(eq(photos.veedelName, veedelName));
+    return rows as unknown as Photo[];
   }
 
-  async createPhoto(photo: InsertPhoto): Promise<Photo> {
+  async createPhoto(photo: InsertPhoto & { data?: Buffer; mimeType?: string }): Promise<Photo> {
     const result = await db.insert(photos).values(photo).returning();
     return result[0];
+  }
+
+  async getPhotoData(filename: string): Promise<{ data: Buffer; mimeType: string } | undefined> {
+    const result = await db.select().from(photos).where(eq(photos.filename, filename));
+    const row = result[0];
+    if (!row || !row.data) return undefined;
+    return { data: row.data as Buffer, mimeType: row.mimeType || "application/octet-stream" };
   }
 
   async deletePhoto(id: number): Promise<void> {
